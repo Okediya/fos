@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>fos</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #chat { width: 100%; height: 200px; border: 1px solid #ccc; overflow-y: scroll; padding: 10px; }
+        #message { width: 80%; }
+        button { padding: 5px 10px; }
+        #status { color: blue; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>fos</h1>
+    <p>Your Client ID: <span id="clientId">Not connected</span></p>
+    <p>Enter peer's Client ID to connect:</p>
+    <input id="peerId" type="text" placeholder="Peer's Client ID">
+    <button onclick="startConnection()">Start Connection</button>
+    <p>Chat:</p>
+    <div id="status">Status: Not connected</div>
+    <div id="chat"></div>
+    <input id="message" type="text" placeholder="Type a message...">
+    <button onclick="sendMessage()">Send</button>
+    <p><a href="https://buymeacoffee.com/yourusername" target="_blank">Support this project!</a></p>
+
+    <script>
+        let peerConnection;
+        let dataChannel;
+        let ws;
+        let clientId;
+
+        function updateStatus(message) {
+            document.getElementById('status').textContent = `Status: ${message}`;
+            console.log(`Status: ${message}`);
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket('ws://localhost:8080/ws');
+            
+            ws.onopen = () => {
+                updateStatus('Connected to signaling server');
+            };
+            
+            ws.onmessage = async (event) => {
+                const msg = JSON.parse(event.data);
+                console.log('Received:', msg);
+                
+                if (msg.type === 'client_id') {
+                    clientId = msg.id;
+                    document.getElementById('clientId').textContent = clientId;
+                    updateStatus(`Connected as Client ${clientId}`);
+                } else if (msg.type === 'offer') {
+                    await handleOffer(msg.from, msg.data);
+                } else if (msg.type === 'answer') {
+                    await handleAnswer(msg.data);
+                } else if (msg.type === 'ice') {
+                    await handleIceCandidate(msg.data);
+                }
+            };
+            
+            ws.onclose = () => {
+                updateStatus('Disconnected from signaling server');
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('Signaling server error');
+            };
+        }
+
+        async function startConnection() {
+            const peerId = document.getElementById('peerId').value;
+            if (!peerId) {
+                alert('Please enter peer’s Client ID');
+                return;
+            }
+            
+            peerConnection = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+            
+            dataChannel = peerConnection.createDataChannel('chat');
+            dataChannel.onopen = () => updateStatus('Data channel open! Ready to chat.');
+            dataChannel.onclose = () => updateStatus('Data channel closed.');
+            dataChannel.onmessage = (event) => {
+                const chat = document.getElementById('chat');
+                chat.innerHTML += `<p><b>Peer:</b> ${event.data}</p>`;
+                chat.scrollTop = chat.scrollHeight;
+            };
+            
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({
+                        type: 'ice',
+                        target: peerId,
+                        data: event.candidate
+                    }));
+                }
+            };
+            
+            peerConnection.onconnectionstatechange = () => {
+                updateStatus(`Connection state: ${peerConnection.connectionState}`);
+                if (peerConnection.connectionState === 'connected') {
+                    updateStatus('Connected! You can now chat.');
+                }
+            };
+            
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            ws.send(JSON.stringify({
+                type: 'offer',
+                target: peerId,
+                data: peerConnection.localDescription
+            }));
+            updateStatus('Offer sent. Waiting for answer.');
+        }
+
+        async function handleOffer(from, offer) {
+            peerConnection = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+            
+            peerConnection.ondatachannel = (event) => {
+                dataChannel = event.channel;
+                dataChannel.onopen = () => updateStatus('Data channel open! Ready to chat.');
+                dataChannel.onclose = () => updateStatus('Data channel closed.');
+                dataChannel.onmessage = (event) => {
+                    const chat = document.getElementById('chat');
+                    chat.innerHTML += `<p><b>Peer:</b> ${event.data}</p>`;
+                    chat.scrollTop = chat.scrollHeight;
+                };
+            };
+            
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({
+                        type: 'ice',
+                        target: from,
+                        data: event.candidate
+                    }));
+                }
+            };
+            
+            peerConnection.onconnectionstatechange = () => {
+                updateStatus(`Connection state: ${peerConnection.connectionState}`);
+                if (peerConnection.connectionState === 'connected') {
+                    updateStatus('Connected! You can now chat.');
+                }
+            };
+            
+            await peerConnection.setRemoteDescription(offer);
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            ws.send(JSON.stringify({
+                type: 'answer',
+                target: from,
+                data: peerConnection.localDescription
+            }));
+            updateStatus('Answer sent. Waiting for connection.');
+        }
+
+        async function handleAnswer(answer) {
+            await peerConnection.setRemoteDescription(answer);
+            updateStatus('Answer received. Connecting...');
+        }
+
+        async function handleIceCandidate(candidate) {
+            await peerConnection.addIceCandidate(candidate);
+            console.log('Added ICE candidate');
+        }
+
+        function sendMessage() {
+            const message = document.getElementById('message').value;
+            if (!message) {
+                alert('Please type a message.');
+                return;
+            }
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                alert('Data channel is not open. Ensure connection is established.');
+                return;
+            }
+            dataChannel.send(message);
+            const chat = document.getElementById('chat');
+            chat.innerHTML += `<p><b>You:</b> ${message}</p>`;
+            chat.scrollTop = chat.scrollHeight;
+            document.getElementById('message').value = '';
+        }
+
+        // Connect to the signaling server on page load
+        connectWebSocket();
+    </script>
+</body>
+</html>
