@@ -1,20 +1,19 @@
 from aiohttp import web, WSMsgType
 import json
 
-# Store connected clients and their WebSocket connections
 clients = {}
 
 async def websocket_handler(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     
-    # Generate a unique client ID
+    
     client_id = str(len(clients))
     clients[client_id] = ws
     print(f"Client {client_id} connected")
     
     try:
-        # Send client ID to the client
+        
         await ws.send_json({"type": "client_id", "id": client_id})
         
         # Handle incoming messages
