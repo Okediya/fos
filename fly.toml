@@ -1,14 +1,28 @@
-app = "fos-3333"
-kill_signal = "SIGINT"
-kill_timeout = 5
-processes = []
+# fly.toml app configuration file generated for fos-3333 on 2025-06-24T17:45:38+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'fos-3333'
+primary_region = 'jnb'
+kill_signal = 'SIGINT'
+kill_timeout = '5s'
+
+[build]
+
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-[http_service.concurrency]
-  type = "connections"
-  soft_limit = 200
-  hard_limit = 250
+
+  [http_service.concurrency]
+    type = 'connections'
+    hard_limit = 250
+    soft_limit = 200
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
